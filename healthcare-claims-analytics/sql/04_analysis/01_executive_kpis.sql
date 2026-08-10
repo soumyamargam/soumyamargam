@@ -14,12 +14,9 @@ SELECT
     SUM(final_paid_amount)                                        AS total_paid,
 
  -- First-pass denial rate: the single most watched RCM metric
-ROUND(
-    100.0 * SUM(CASE WHEN is_denied_first_pass THEN 1 ELSE 0 END)
-    / NULLIF(
-        SUM(CASE WHEN NOT is_pending THEN 1 ELSE 0 END),
-        0
-    ),
+ROUND(100.0 * SUM(CASE WHEN is_denied_first_pass THEN 1 ELSE 0 END)
+    /
+	SUM(CASE WHEN NOT is_pending THEN 1 ELSE 0 END),
     2
 ) AS first_pass_denial_rate_pct,
 
@@ -27,32 +24,23 @@ ROUND(
 -- Clean claim rate: paid on the first submission, no rework
 ROUND(
     100.0 * SUM(CASE WHEN claim_outcome = 'Paid First Pass' THEN 1 ELSE 0 END)
-    / NULLIF(
-        SUM(CASE WHEN NOT is_pending THEN 1 ELSE 0 END),
-        0
-    ),
-    2
-) AS clean_claim_rate_pct,
+    /SUM(CASE WHEN NOT is_pending THEN 1 ELSE 0 END),2) AS clean_claim_rate_pct,
 
 
 -- Of the claims denied first time, how many did we eventually win?
 ROUND(
     100.0 * SUM(CASE WHEN is_overturned THEN 1 ELSE 0 END)
-    / NULLIF(
-        SUM(CASE WHEN is_denied_first_pass THEN 1 ELSE 0 END),
-        0
-    ),
-    2
-) AS denial_overturn_rate_pct
+    /SUM(CASE WHEN is_denied_first_pass THEN 1 ELSE 0 END),2
+) AS denial_overturn_rate_pct,
 
     -- Net collection rate: paid as a share of what we were entitled to
     ROUND(100.0 * SUM(final_paid_amount)
-          / NULLIF(SUM(allowed_amount), 0), 2)                    AS net_collection_rate_pct,
+          /SUM(allowed_amount), 2)                    AS net_collection_rate_pct,
 
     ROUND(AVG(days_to_payment), 1)                                AS avg_days_to_payment,
     ROUND(AVG(days_to_first_response), 1)                         AS avg_days_to_first_response,
 
-    COUNT(*) FILTER (WHERE is_pending)                            AS pending_claims,
+    sum(case when is_pending then 1 else 0 end)                            AS pending_claims,
     SUM(revenue_at_risk)                                          AS revenue_at_risk
 FROM marts.fct_claim;
 
@@ -65,11 +53,21 @@ FROM marts.fct_claim;
 WITH monthly AS (
     SELECT
         submission_month,
-        COUNT(*) FILTER (WHERE NOT is_pending)                   AS adjudicated_claims,
-        COUNT(*) FILTER (WHERE is_denied_first_pass)             AS denied_claims,
-        ROUND(100.0 * COUNT(*) FILTER (WHERE is_denied_first_pass)
-              / NULLIF(COUNT(*) FILTER (WHERE NOT is_pending), 0), 2) AS denial_rate_pct,
-        SUM(billed_amount) FILTER (WHERE is_denied_first_pass)   AS denied_charges
+        sum(case when NOT is_pending then 1 else 0 end)                   AS adjudicated_claims,
+        sum(case when is_denied_first_pass then 1 else 0 end)             AS denied_claims,
+        -- ROUND(100.0 * sum(case when is_denied_first_pass then 1 else 0 end)
+        --       / sum(case when not is_pending then 1 else 0 end), 2) AS denial_rate_pct,
+			  
+			  ROUND(
+    100.0 *
+    SUM(CASE WHEN is_denied_first_pass THEN 1 ELSE 0 END)
+    / NULLIF(
+        SUM(CASE WHEN NOT is_pending THEN 1 ELSE 0 END),
+        0
+    ),
+    2
+) AS denial_rate_pct,
+        SUM(case when is_denied_first_pass then billed_amount else 0 end)   AS denied_charges
     FROM marts.fct_claim
     GROUP BY submission_month
 )
